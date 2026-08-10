@@ -8,6 +8,16 @@ def is_valid_remote(ip):
     except ValueError:
         return False
 
+def format_bytes(bytes_num):
+    if not bytes_num:
+        return "0 B"
+    num = float(bytes_num)
+    for unit in ["B", "KB", "MB", "GB"]:
+        if num < 1024.0:
+            return f"{num:.1f} {unit}"
+        num /= 1024.0
+    return f"{num:.1f} TB"
+
 def get_connections():
     connections = []
     try:
@@ -21,11 +31,16 @@ def get_connections():
             if is_valid_remote(ip):
                 proc_name = "Unknown"
                 proc_path = ""
+                io_read = "0 B"
+                io_write = "0 B"
                 if conn.pid:
                     try:
                         p = psutil.Process(conn.pid)
                         proc_name = p.name()
                         proc_path = p.exe()
+                        io = p.io_counters()
+                        io_read = format_bytes(io.read_bytes)
+                        io_write = format_bytes(io.write_bytes)
                     except Exception:
                         pass
                 connections.append({
@@ -34,6 +49,8 @@ def get_connections():
                     "process_path": proc_path,
                     "remote_port": conn.raddr.port,
                     "local_port": conn.laddr.port,
-                    "status": conn.status
+                    "status": conn.status,
+                    "io_read": io_read,
+                    "io_write": io_write
                 })
     return connections
