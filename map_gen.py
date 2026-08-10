@@ -45,7 +45,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             border: 1px solid #30363d;
             border-radius: 8px;
             padding: 15px;
-            width: 260px;
+            width: 270px;
             color: #c9d1d9;
             box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
         }
@@ -79,8 +79,18 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             box-sizing: border-box;
             outline: none;
         }
-        .control-input:focus, .control-select:focus {
-            border-color: #388bfd;
+        .live-box {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background-color: #0d1117;
+            border: 1px solid #30363d;
+            padding: 8px 10px;
+            border-radius: 4px;
+            margin-bottom: 12px;
+            font-size: 12px;
+            color: #2ea44f;
+            font-weight: bold;
         }
         .stats-box {
             font-size: 11px;
@@ -121,6 +131,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     
     <div class="control-panel">
         <h3 id="panel-title"></h3>
+        <div class="live-box">
+            <span>Live Refresh (5s)</span>
+            <input type="checkbox" id="live-toggle" onchange="toggleLiveMode(this)">
+        </div>
         <div class="control-group">
             <label id="search-label" for="search-input"></label>
             <input type="text" id="search-input" class="control-input" onkeyup="applyFilters()">
@@ -149,6 +163,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         var localLat = localGeo.lat || 0.0;
         var localLon = localGeo.lon || 0.0;
         var elements = [];
+        var liveInterval = null;
 
         document.getElementById('panel-title').innerText = labels.map_panel_title;
         document.getElementById('search-label').innerText = labels.map_panel_search_lbl;
@@ -219,7 +234,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         var maxThreatScore = 0;
 
-        connections.forEach(function(conn) {
+        function addConnectionToMap(conn) {
             var dotClass = 'dot-green';
             if (conn.score >= 60) {
                 dotClass = 'dot-red';
@@ -244,6 +259,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             var safeCity = escapeHtml(conn.city);
             var safeCountry = escapeHtml(conn.country);
             var safeStatus = escapeHtml(conn.status);
+            var safeIoRead = escapeHtml(conn.io_read || "0 B");
+            var safeIoWrite = escapeHtml(conn.io_write || "0 B");
 
             if (conn.score > maxThreatScore) {
                 maxThreatScore = conn.score;
@@ -252,6 +269,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             var popupContent = "<b>" + labels.map_popup_process + ":</b> " + safeProcess + "<br>" +
                                "<b>" + labels.map_popup_ip + ":</b> " + safeIp + " (" + conn.remote_port + ")<br>" +
                                "<b>" + labels.map_popup_hostname + ":</b> " + safeHostname + "<br>" +
+                               "<b>Traffic I/O:</b> R: " + safeIoRead + " | W: " + safeIoWrite + "<br>" +
                                "<b>" + labels.map_popup_lport + ":</b> " + conn.local_port + "<br>" +
                                "<b>" + labels.map_popup_status + ":</b> " + safeStatus + "<br>" +
                                "<b>" + labels.map_popup_isp + ":</b> " + safeIsp + "<br>" +
@@ -282,6 +300,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 score: conn.score,
                 data: conn
             });
+        }
+
+        connections.forEach(function(conn) {
+            addConnectionToMap(conn);
         });
 
         document.getElementById('stat-total-val').innerText = elements.length;
@@ -315,8 +337,40 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             document.getElementById('stat-total-val').innerText = visibleCount;
         }
 
+        function toggleLiveMode(checkbox) {
+            if (checkbox.checked) {
+                liveInterval = setInterval(fetchLiveUpdates, 5000);
+                fetchLiveUpdates();
+            } else {
+                if (liveInterval) clearInterval(liveInterval);
+            }
+        }
+
+        function fetchLiveUpdates() {
+            fetch('/api/live')
+                .then(function(res) { return res.json(); })
+                .then(function(data) {
+                    if (data && data.remote_data) {
+                        elements.forEach(function(item) {
+                            map.removeLayer(item.marker);
+                            map.removeLayer(item.line);
+                        });
+                        elements = [];
+                        maxThreatScore = 0;
+                        connections = data.remote_data;
+
+                        connections.forEach(function(conn) {
+                            addConnectionToMap(conn);
+                        });
+                        
+                        applyFilters();
+                        document.getElementById('stat-max-val').innerText = maxThreatScore;
+                    }
+                });
+        }
+
         function exportCSV() {
-            var csvRows = ["Process,Remote IP,Remote Port,Local Port,Status,City,Country,ISP,Threat Score"];
+            var csvRows = ["Process,Remote IP,Remote Port,Local Port,Status,Read Bytes,Written Bytes,City,Country,ISP,Threat Score"];
             connections.forEach(function(c) {
                 var row = [
                     '"' + c.process + '"',
@@ -324,6 +378,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     c.remote_port,
                     c.local_port,
                     '"' + c.status + '"',
+                    '"' + (c.io_read || "0 B") + '"',
+                    '"' + (c.io_write || "0 B") + '"',
                     '"' + c.city + '"',
                     '"' + c.country + '"',
                     '"' + c.isp + '"',
