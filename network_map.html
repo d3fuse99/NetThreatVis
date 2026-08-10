@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Network Threat Intelligence Visualizer</title>
+    <meta charset="utf-8">
+    <title>Network Threat Intelligence Map</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
     <style>
@@ -10,15 +11,16 @@
             padding: 0;
             height: 100%;
             width: 100%;
+            background-color: #0d1117;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #c9d1d9;
         }
         .map-container {
             height: 100%;
             width: 100%;
         }
         @keyframes flow {
-            to {
-                stroke-dashoffset: -20;
-            }
+            to { stroke-dashoffset: -20; }
         }
         .flow-line {
             stroke-dasharray: 8, 8;
@@ -29,82 +31,11 @@
 <body>
     <div class="map-container" id="map-element"></div>
     <script>
-        var localGeo = {"status": "success", "country": "Ukraine", "countryCode": "UA", "region": "71", "regionName": "Cherkasy Oblast", "city": "Cherkasy", "zip": "18005", "lat": 49.4345, "lon": 32.0541, "timezone": "Europe/Kyiv", "isp": "broadband", "org": "", "as": "AS25133 LLC \"McLaut-Invest\"", "query": "212.55.76.218"};
-        var connections = [{"ip": "162.159.128.235", "process": "Discord.exe", "local_port": 51432, "remote_port": 2083, "status": "ESTABLISHED", "lat": 43.6532, "lon": -79.3832, "city": "Toronto", "country": "Canada", "isp": "Cloudflare, Inc.", "as": "AS13335 Cloudflare, Inc.", "score": 35, "factors": ["Hosting / Datacenter (risk of automated traffic)"], "color": "red"}, {"ip": "149.154.167.99", "process": "chrome.exe", "local_port": 59028, "remote_port": 443, "status": "ESTABLISHED", "lat": 52.3716, "lon": 4.8883, "city": "Amsterdam", "country": "The Netherlands", "isp": "Telegram Messenger Amsterdam Network", "as": "AS62041 Telegram Messenger Inc", "score": 0, "factors": ["Residential IP (low risk)"], "color": "green"}, {"ip": "149.154.167.99", "process": "chrome.exe", "local_port": 56973, "remote_port": 443, "status": "ESTABLISHED", "lat": 52.3716, "lon": 4.8883, "city": "Amsterdam", "country": "The Netherlands", "isp": "Telegram Messenger Amsterdam Network", "as": "AS62041 Telegram Messenger Inc", "score": 0, "factors": ["Residential IP (low risk)"], "color": "green"}, {"ip": "52.98.253.82", "process": "explorer.exe", "local_port": 49488, "remote_port": 443, "status": "ESTABLISHED", "lat": 50.1109, "lon": 8.6821, "city": "Frankfurt", "country": "Germany", "isp": "Microsoft Corporation", "as": "AS8075 Microsoft Corporation", "score": 35, "factors": ["Hosting / Datacenter (risk of automated traffic)"], "color": "green"}, {"ip": "149.154.167.99", "process": "chrome.exe", "local_port": 55037, "remote_port": 443, "status": "ESTABLISHED", "lat": 52.3716, "lon": 4.8883, "city": "Amsterdam", "country": "The Netherlands", "isp": "Telegram Messenger Amsterdam Network", "as": "AS62041 Telegram Messenger Inc", "score": 0, "factors": ["Residential IP (low risk)"], "color": "green"}, {"ip": "98.66.133.185", "process": "svchost.exe", "local_port": 56259, "remote_port": 443, "status": "ESTABLISHED", "lat": 48.856567, "lon": 2.347322, "city": "Paris", "country": "France", "isp": "Microsoft Corporation", "as": "AS8075 Microsoft Corporation", "score": 35, "factors": ["Hosting / Datacenter (risk of automated traffic)"], "color": "green"}, {"ip": "149.154.167.99", "process": "chrome.exe", "local_port": 56424, "remote_port": 443, "status": "ESTABLISHED", "lat": 52.3716, "lon": 4.8883, "city": "Amsterdam", "country": "The Netherlands", "isp": "Telegram Messenger Amsterdam Network", "as": "AS62041 Telegram Messenger Inc", "score": 0, "factors": ["Residential IP (low risk)"], "color": "green"}, {"ip": "142.251.9.188", "process": "chrome.exe", "local_port": 59008, "remote_port": 5228, "status": "ESTABLISHED", "lat": 37.4225, "lon": -122.085, "city": "Mountain View", "country": "United States", "isp": "Google LLC", "as": "AS15169 Google LLC", "score": 35, "factors": ["Hosting / Datacenter (risk of automated traffic)"], "color": "red"}, {"ip": "52.98.253.82", "process": "explorer.exe", "local_port": 49489, "remote_port": 443, "status": "ESTABLISHED", "lat": 50.1109, "lon": 8.6821, "city": "Frankfurt", "country": "Germany", "isp": "Microsoft Corporation", "as": "AS8075 Microsoft Corporation", "score": 35, "factors": ["Hosting / Datacenter (risk of automated traffic)"], "color": "green"}, {"ip": "162.159.134.234", "process": "Discord.exe", "local_port": 64725, "remote_port": 443, "status": "ESTABLISHED", "lat": 43.6532, "lon": -79.3832, "city": "Toronto", "country": "Canada", "isp": "Cloudflare, Inc.", "as": "AS13335 Cloudflare, Inc.", "score": 35, "factors": ["Hosting / Datacenter (risk of automated traffic)"], "color": "green"}, {"ip": "52.110.17.25", "process": "StartMenuExperienceHost.exe", "local_port": 49718, "remote_port": 443, "status": "ESTABLISHED", "lat": 50.1109, "lon": 8.6821, "city": "Frankfurt", "country": "Germany", "isp": "Microsoft Corporation", "as": "AS8075 Microsoft Corporation", "score": 35, "factors": ["Hosting / Datacenter (risk of automated traffic)"], "color": "green"}];
-
-        var localLat = localGeo.lat || 0.0;
-        var localLon = localGeo.lon || 0.0;
-
-        var map = L.map(document.getElementById('map-element')).setView([localLat, localLon], 3);
-        
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: 'Map data &copy; OpenStreetMap contributors'
+        var map = L.map('map-element').setView([20, 0], 2);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; OpenStreetMap &copy; CARTO',
+            maxZoom: 19
         }).addTo(map);
-
-        var ispMarker = L.marker([localLat, localLon]).addTo(map);
-        ispMarker.bindPopup("<b>Ваш интернет-провайдер (IP Gateway)</b><br>" +
-                             "<b>IP:</b> " + (localGeo.query || "Unknown") + "<br>" +
-                             "<b>Провайдер:</b> " + (localGeo.isp || "Unknown") + "<br>" +
-                             "<b>Организация:</b> " + (localGeo.org || "Unknown") + "<br>" +
-                             "<b>AS:</b> " + (localGeo.as || "Unknown") + "<br>" +
-                             "<b>Местоположение:</b> " + (localGeo.city || "Unknown") + ", " + (localGeo.country || "Unknown"));
-
-        if (navigator.geolocation) {
-            navigator.geolocation.getCurrentPosition(function(position) {
-                var preciseLat = position.coords.latitude;
-                var preciseLon = position.coords.longitude;
-                
-                var preciseMarker = L.marker([preciseLat, preciseLon], {
-                    icon: L.divIcon({
-                        className: 'precise-marker-icon',
-                        html: '<div style="background-color: blue; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white;"></div>',
-                        iconSize: [12, 12]
-                    })
-                }).addTo(map);
-                preciseMarker.bindPopup("<b>Ваше точное местоположение</b><br>Получено через браузер").openPopup();
-                
-                L.polyline([[preciseLat, preciseLon], [localLat, localLon]], {
-                    color: 'gray',
-                    weight: 1.5,
-                    dashArray: '5, 5'
-                }).addTo(map);
-
-                var bounds = L.latLngBounds([[preciseLat, preciseLon], [localLat, localLon]]);
-                map.fitBounds(bounds);
-                
-            }, function() {
-                ispMarker.openPopup();
-            });
-        } else {
-            ispMarker.openPopup();
-        }
-
-        connections.forEach(function(conn) {
-            var remoteMarker = L.marker([conn.lat, conn.lon]).addTo(map);
-            var factorsText = conn.factors.join('<br>&bull; ');
-            var popupContent = "<b>Процесс:</b> " + conn.process + "<br>" +
-                               "<b>IP:</b> " + conn.ip + " (Порт: " + conn.remote_port + ")<br>" +
-                               "<b>Локальный порт:</b> " + conn.local_port + "<br>" +
-                               "<b>Статус:</b> " + conn.status + "<br>" +
-                               "<b>Провайдер:</b> " + conn.isp + "<br>" +
-                               "<b>AS:</b> " + conn.as + "<br>" +
-                               "<b>Местоположение:</b> " + conn.city + ", " + conn.country + "<br>" +
-                               "<b>Оценка угрозы:</b> " + conn.score + "/100<br>" +
-                               "<b>Факторы:</b><br>&bull; " + factorsText;
-            remoteMarker.bindPopup(popupContent);
-
-            var line = L.polyline([
-                [localLat, localLon],
-                [conn.lat, conn.lon]
-            ], {
-                color: conn.color,
-                weight: 2.5,
-                opacity: 0.8,
-                className: 'flow-line'
-            }).addTo(map);
-            
-            line.bindPopup(popupContent);
-        });
     </script>
 </body>
 </html>
