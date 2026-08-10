@@ -1,7 +1,16 @@
 __pycache__/
 *.py[cod]
+*$py.class
 .venv/
 venv/
+ENV/
+env/
 cache.db
+cache.db-journal
+cache.db-wal
+cache.db-shm
 .DS_Store
 Thumbs.db
+.idea/
+.vscode/
+*.csv
