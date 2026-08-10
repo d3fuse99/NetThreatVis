@@ -9,9 +9,12 @@ from config import CACHE_DB_FILE, CACHE_TTL_DAYS, IP_API_URL, DNSBL_LIST
 
 socket.setdefaulttimeout(1.5)
 
+def get_db_connection():
+    return sqlite3.connect(CACHE_DB_FILE, timeout=10.0)
+
 def init_db():
     try:
-        conn = sqlite3.connect(CACHE_DB_FILE)
+        conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS geolocations (
@@ -34,7 +37,7 @@ def init_db():
 
 def get_cached_geolocation(ip):
     try:
-        conn = sqlite3.connect(CACHE_DB_FILE)
+        conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT lat, lon, city, country, isp, org, as_num, hostname, timestamp FROM geolocations WHERE ip = ?", (ip,))
         row = cursor.fetchone()
@@ -60,7 +63,7 @@ def get_cached_geolocation(ip):
 
 def save_geolocation_to_cache(ip, data, hostname):
     try:
-        conn = sqlite3.connect(CACHE_DB_FILE)
+        conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("""
             INSERT OR REPLACE INTO geolocations (ip, lat, lon, city, country, isp, org, as_num, hostname, timestamp)
@@ -97,7 +100,7 @@ def get_geolocation(ip=""):
     
     try:
         url = IP_API_URL + ip
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 NetworkThreatVisualizer"})
         with urllib.request.urlopen(req, timeout=3.0) as response:
             data = json.loads(response.read().decode())
             if data.get("status") == "success":
@@ -128,12 +131,10 @@ def check_dnsbl(ip):
         return []
 
     listed_in = []
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        futures = [executor.submit(check_dnsbl_single, ip, dnsbl) for dnsbl in DNSBL_LIST]
-        for future in futures:
-            res = future.result()
-            if res:
-                listed_in.append(res)
+    for dnsbl in DNSBL_LIST:
+        res = check_dnsbl_single(ip, dnsbl)
+        if res:
+            listed_in.append(res)
     return listed_in
 
 def evaluate_reputation(ip, isp_name, org_name, process_path=""):
@@ -141,7 +142,7 @@ def evaluate_reputation(ip, isp_name, org_name, process_path=""):
     factors = []
     
     dc_keywords = ["hosting", "cloud", "amazon", "google", "microsoft", "digitalocean", "hetzner", "ovh", "datacenter", "server", "vps", "linode"]
-    combined = (isp_name + " " + org_name).lower()
+    combined = (str(isp_name) + " " + str(org_name)).lower()
     is_dc = any(kw in combined for kw in dc_keywords)
     
     if is_dc:
