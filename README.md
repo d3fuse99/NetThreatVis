@@ -5,6 +5,8 @@ An interactive network topography and threat intelligence visualizer written in 
 ## Features
 
 - **Live Socket Inspection**: Real-time analysis of system TCP connections via `psutil`.
+- **Live Auto-Refresh Mode**: Dynamic map updates every 5 seconds without page reloading.
+- **Process Bandwidth I/O Tracking**: Displays real-time read and write data bytes for each active process.
 - **Parallel Scanning Engine**: Asynchronous multi-threaded lookup architecture using `ThreadPoolExecutor`.
 - **Geographic Topography**: Map plotting with Leaflet & CartoDB Dark Matter tiles.
 - **Threat Intelligence Scoring**: Calculates threat scores based on Hosting/Datacenter networks, DNSBL blocklists (Barracuda, SpamCop, SORBS), and untrusted process directories.
@@ -15,6 +17,6 @@ An interactive network topography and threat intelligence visualizer written in 
 ## Installation
 
 ```bash
-git clone https://github.com/your-username/network-threat-visualizer.git
-cd network-threat-visualizer
+git clone https://github.com/d3fuse99/NetThreatVis.git
+cd NetThreatVis
 pip install -r requirements.txt
