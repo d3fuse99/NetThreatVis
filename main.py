@@ -4,7 +4,7 @@ import webbrowser
 import json
 import threading
 import platform
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 from config import SERVER_HOST, SERVER_PORT, MAX_WORKERS
@@ -125,6 +125,52 @@ def fetch_ip_worker(ip):
     geo = get_geolocation(ip)
     return ip, geo
 
+def process_active_connections(active_conns, limit=100):
+    unique_ips = list(set(conn["ip"] for conn in active_conns))[:limit]
+    cache = {}
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = {executor.submit(fetch_ip_worker, ip): ip for ip in unique_ips}
+        for future in as_completed(futures):
+            try:
+                resolved_ip, geo = future.result()
+                if geo:
+                    cache[resolved_ip] = geo
+            except Exception:
+                pass
+
+    remote_data = []
+    for conn in active_conns:
+        ip = conn["ip"]
+        if ip in cache:
+            geo = cache[ip]
+            isp = geo.get("isp", "Unknown")
+            org = geo.get("org", "Unknown")
+            as_num = geo.get("as", "Unknown")
+            
+            score, factors = evaluate_reputation(ip, isp, org, conn.get("process_path", ""))
+            color = get_port_color(conn["remote_port"])
+            
+            remote_data.append({
+                "ip": ip,
+                "process": conn["process"],
+                "local_port": conn["local_port"],
+                "remote_port": conn["remote_port"],
+                "status": conn["status"],
+                "lat": geo.get("lat", 0.0),
+                "lon": geo.get("lon", 0.0),
+                "city": geo.get("city", "Unknown"),
+                "country": geo.get("country", "Unknown"),
+                "isp": isp,
+                "as": as_num,
+                "score": score,
+                "factors": factors,
+                "color": color,
+                "hostname": geo.get("hostname", "Unknown"),
+                "io_read": conn.get("io_read", "0 B"),
+                "io_write": conn.get("io_write", "0 B")
+            })
+    return remote_data
+
 def run_scan_thread(limit):
     global SCAN_STATE
     SCAN_STATE["status"] = "scanning"
@@ -144,11 +190,13 @@ def run_scan_thread(limit):
     SCAN_STATE["total"] = len(unique_ips)
 
     cache = {}
+    completed_count = 0
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {executor.submit(fetch_ip_worker, ip): ip for ip in unique_ips}
-        for index, future in enumerate(futures, 1):
+        for future in as_completed(futures):
+            completed_count += 1
             ip = futures[future]
-            SCAN_STATE["current"] = index
+            SCAN_STATE["current"] = completed_count
             SCAN_STATE["current_ip"] = ip
             try:
                 resolved_ip, geo = future.result()
@@ -184,7 +232,9 @@ def run_scan_thread(limit):
                 "score": score,
                 "factors": factors,
                 "color": color,
-                "hostname": geo.get("hostname", "Unknown")
+                "hostname": geo.get("hostname", "Unknown"),
+                "io_read": conn.get("io_read", "0 B"),
+                "io_write": conn.get("io_write", "0 B")
             })
             
     SCAN_STATE["remote_data"] = remote_data
@@ -195,25 +245,26 @@ class VisualizerHandler(BaseHTTPRequestHandler):
         global CURRENT_LANG
         parsed_path = urlparse(self.path)
         
-        if parsed_path.path == "/":
-            self.send_response(200)
-            self.send_header("Content-type", "text/html; charset=utf-8")
-            self.end_headers()
-            
-            active_conns = get_connections()
-            unique_ips = list(set(conn["ip"] for conn in active_conns))
-            total_conns = len(unique_ips)
-            local_ports_count = len(active_conns)
-            local_platform = platform.system() + " " + platform.release()
+        try:
+            if parsed_path.path == "/":
+                self.send_response(200)
+                self.send_header("Content-type", "text/html; charset=utf-8")
+                self.end_headers()
+                
+                active_conns = get_connections()
+                unique_ips = list(set(conn["ip"] for conn in active_conns))
+                total_conns = len(unique_ips)
+                local_ports_count = len(active_conns)
+                local_platform = platform.system() + " " + platform.release()
 
-            local_geo = get_geolocation() or {
-                "lat": 0.0, "lon": 0.0, "city": "Unknown", "country": "Unknown", 
-                "query": "127.0.0.1", "isp": "Unknown", "org": "Unknown", "as": "Unknown"
-            }
+                local_geo = get_geolocation() or {
+                    "lat": 0.0, "lon": 0.0, "city": "Unknown", "country": "Unknown", 
+                    "query": "127.0.0.1", "isp": "Unknown", "org": "Unknown", "as": "Unknown"
+                }
 
-            labels = TRANSLATIONS[CURRENT_LANG]
+                labels = TRANSLATIONS[CURRENT_LANG]
 
-            home_html = """<!DOCTYPE html>
+                home_html = """<!DOCTYPE html>
 <html>
 <head>
     <title>Network Threat Intelligence Visualizer</title>
@@ -391,62 +442,62 @@ class VisualizerHandler(BaseHTTPRequestHandler):
     </div>
 </body>
 </html>"""
-            home_html = home_html.replace("__TITLE__", labels["title"])
-            home_html = home_html.replace("__BADGE__", labels["badge"])
-            home_html = home_html.replace("__BTN_5__", labels["btn_5"])
-            home_html = home_html.replace("__BTN_10__", labels["btn_10"])
-            home_html = home_html.replace("__BTN_15__", labels["btn_15"])
-            home_html = home_html.replace("__BTN_ALL_RAW__", labels["btn_all"].replace(" ({count})", ""))
-            home_html = home_html.replace("__CUSTOM_LABEL__", labels["custom_label"])
-            home_html = home_html.replace("__BTN_SUBMIT__", labels["btn_submit"])
-            home_html = home_html.replace("__LANG_BTN__", labels["lang_btn"])
-            home_html = home_html.replace("__TOTAL_CONNS__", str(total_conns if total_conns > 0 else 1))
-            home_html = home_html.replace("__LABEL_NET_TITLE__", labels["dash_net_title"])
-            home_html = home_html.replace("__LABEL_NET_IP__", labels["dash_net_ip"])
-            home_html = home_html.replace("__LABEL_NET_ISP__", labels["dash_net_isp"])
-            home_html = home_html.replace("__LABEL_NET_LOC__", labels["dash_net_loc"])
-            home_html = home_html.replace("__LABEL_NET_PLATFORM__", labels["dash_net_platform"])
-            home_html = home_html.replace("__LABEL_NET_PORTS__", labels["dash_net_ports"])
-            home_html = home_html.replace("__LABEL_CONTROL_TITLE__", labels["dash_control_title"])
-            home_html = home_html.replace("__LOCAL_IP__", str(local_geo.get("query", "Unknown")))
-            home_html = home_html.replace("__LOCAL_ISP__", str(local_geo.get("isp", "Unknown")))
-            home_html = home_html.replace("__LOCAL_CITY__", str(local_geo.get("city", "Unknown")))
-            home_html = home_html.replace("__LOCAL_COUNTRY__", str(local_geo.get("country", "Unknown")))
-            home_html = home_html.replace("__LOCAL_PLATFORM__", str(local_platform))
-            home_html = home_html.replace("__LOCAL_PORTS__", str(local_ports_count))
+                home_html = home_html.replace("__TITLE__", labels["title"])
+                home_html = home_html.replace("__BADGE__", labels["badge"])
+                home_html = home_html.replace("__BTN_5__", labels["btn_5"])
+                home_html = home_html.replace("__BTN_10__", labels["btn_10"])
+                home_html = home_html.replace("__BTN_15__", labels["btn_15"])
+                home_html = home_html.replace("__BTN_ALL_RAW__", labels["btn_all"].replace(" ({count})", ""))
+                home_html = home_html.replace("__CUSTOM_LABEL__", labels["custom_label"])
+                home_html = home_html.replace("__BTN_SUBMIT__", labels["btn_submit"])
+                home_html = home_html.replace("__LANG_BTN__", labels["lang_btn"])
+                home_html = home_html.replace("__TOTAL_CONNS__", str(total_conns if total_conns > 0 else 1))
+                home_html = home_html.replace("__LABEL_NET_TITLE__", labels["dash_net_title"])
+                home_html = home_html.replace("__LABEL_NET_IP__", labels["dash_net_ip"])
+                home_html = home_html.replace("__LABEL_NET_ISP__", labels["dash_net_isp"])
+                home_html = home_html.replace("__LABEL_NET_LOC__", labels["dash_net_loc"])
+                home_html = home_html.replace("__LABEL_NET_PLATFORM__", labels["dash_net_platform"])
+                home_html = home_html.replace("__LABEL_NET_PORTS__", labels["dash_net_ports"])
+                home_html = home_html.replace("__LABEL_CONTROL_TITLE__", labels["dash_control_title"])
+                home_html = home_html.replace("__LOCAL_IP__", str(local_geo.get("query", "Unknown")))
+                home_html = home_html.replace("__LOCAL_ISP__", str(local_geo.get("isp", "Unknown")))
+                home_html = home_html.replace("__LOCAL_CITY__", str(local_geo.get("city", "Unknown")))
+                home_html = home_html.replace("__LOCAL_COUNTRY__", str(local_geo.get("country", "Unknown")))
+                home_html = home_html.replace("__LOCAL_PLATFORM__", str(local_platform))
+                home_html = home_html.replace("__LOCAL_PORTS__", str(local_ports_count))
 
-            self.wfile.write(home_html.encode("utf-8"))
-            
-        elif parsed_path.path == "/toggle_lang":
-            CURRENT_LANG = "ru" if CURRENT_LANG == "en" else "en"
-            self.send_response(303)
-            self.send_header("Location", "/")
-            self.end_headers()
-            
-        elif parsed_path.path == "/scan":
-            query_params = parse_qs(parsed_path.query)
-            limit = 10
-            if "limit" in query_params:
-                try:
-                    limit = int(query_params["limit"][0])
-                except ValueError:
-                    pass
-            
-            if SCAN_STATE["status"] != "scanning":
-                thread = threading.Thread(target=run_scan_thread, args=(limit,))
-                thread.start()
+                self.wfile.write(home_html.encode("utf-8"))
                 
-            self.send_response(303)
-            self.send_header("Location", "/loading")
-            self.end_headers()
-            
-        elif parsed_path.path == "/loading":
-            self.send_response(200)
-            self.send_header("Content-type", "text/html; charset=utf-8")
-            self.end_headers()
-            labels = TRANSLATIONS[CURRENT_LANG]
-            
-            loading_html = """<!DOCTYPE html>
+            elif parsed_path.path == "/toggle_lang":
+                CURRENT_LANG = "ru" if CURRENT_LANG == "en" else "en"
+                self.send_response(303)
+                self.send_header("Location", "/")
+                self.end_headers()
+                
+            elif parsed_path.path == "/scan":
+                query_params = parse_qs(parsed_path.query)
+                limit = 10
+                if "limit" in query_params:
+                    try:
+                        limit = int(query_params["limit"][0])
+                    except ValueError:
+                        pass
+                
+                if SCAN_STATE["status"] != "scanning":
+                    thread = threading.Thread(target=run_scan_thread, args=(limit,))
+                    thread.start()
+                    
+                self.send_response(303)
+                self.send_header("Location", "/loading")
+                self.end_headers()
+                
+            elif parsed_path.path == "/loading":
+                self.send_response(200)
+                self.send_header("Content-type", "text/html; charset=utf-8")
+                self.end_headers()
+                labels = TRANSLATIONS[CURRENT_LANG]
+                
+                loading_html = """<!DOCTYPE html>
 <html>
 <head>
     <title>Scanning...</title>
@@ -519,29 +570,41 @@ class VisualizerHandler(BaseHTTPRequestHandler):
     </script>
 </body>
 </html>"""
-            loading_html = loading_html.replace("__TITLE__", labels["loading_title"])
-            loading_html = loading_html.replace("__LABELS_DATA__", json.dumps(labels))
-            self.wfile.write(loading_html.encode("utf-8"))
-            
-        elif parsed_path.path == "/api/status":
-            self.send_response(200)
-            self.send_header("Content-type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps(SCAN_STATE).encode("utf-8"))
-            
-        elif parsed_path.path == "/map":
-            self.send_response(200)
-            self.send_header("Content-type", "text/html; charset=utf-8")
-            self.end_headers()
-            
-            html_content = HTML_TEMPLATE.replace("__LOCAL_GEO_DATA__", json.dumps(SCAN_STATE["local_geo"]))
-            html_content = html_content.replace("__CONNECTIONS_DATA__", json.dumps(SCAN_STATE["remote_data"]))
-            html_content = html_content.replace("__LABELS_DATA__", json.dumps(TRANSLATIONS[CURRENT_LANG]))
-            
-            self.wfile.write(html_content.encode("utf-8"))
-        else:
-            self.send_response(404)
-            self.end_headers()
+                loading_html = loading_html.replace("__TITLE__", labels["loading_title"])
+                loading_html = loading_html.replace("__LABELS_DATA__", json.dumps(labels))
+                self.wfile.write(loading_html.encode("utf-8"))
+                
+            elif parsed_path.path == "/api/status":
+                self.send_response(200)
+                self.send_header("Content-type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps(SCAN_STATE).encode("utf-8"))
+
+            elif parsed_path.path == "/api/live":
+                self.send_response(200)
+                self.send_header("Content-type", "application/json")
+                self.end_headers()
+                
+                active_conns = get_connections()
+                remote_data = process_active_connections(active_conns)
+                SCAN_STATE["remote_data"] = remote_data
+                self.wfile.write(json.dumps({"remote_data": remote_data}).encode("utf-8"))
+                
+            elif parsed_path.path == "/map":
+                self.send_response(200)
+                self.send_header("Content-type", "text/html; charset=utf-8")
+                self.end_headers()
+                
+                html_content = HTML_TEMPLATE.replace("__LOCAL_GEO_DATA__", json.dumps(SCAN_STATE["local_geo"]))
+                html_content = html_content.replace("__CONNECTIONS_DATA__", json.dumps(SCAN_STATE["remote_data"]))
+                html_content = html_content.replace("__LABELS_DATA__", json.dumps(TRANSLATIONS[CURRENT_LANG]))
+                
+                self.wfile.write(html_content.encode("utf-8"))
+            else:
+                self.send_response(404)
+                self.end_headers()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
 def main():
     server_address = (SERVER_HOST, SERVER_PORT)
