@@ -4,8 +4,7 @@ import socket
 import ipaddress
 import sqlite3
 import time
-from concurrent.futures import ThreadPoolExecutor
-from config import CACHE_DB_FILE, CACHE_TTL_DAYS, IP_API_URL, DNSBL_LIST
+from config import CACHE_DB_FILE, CACHE_TTL_DAYS, IP_API_URL, IP_API_BATCH_URL, DNSBL_LIST
 
 socket.setdefaulttimeout(1.5)
 
@@ -23,6 +22,7 @@ def init_db():
                 lon REAL,
                 city TEXT,
                 country TEXT,
+                country_code TEXT,
                 isp TEXT,
                 org TEXT,
                 as_num TEXT,
@@ -35,15 +35,21 @@ def init_db():
     except Exception:
         pass
 
+def country_code_to_flag(code):
+    if not code or len(code) != 2:
+        return "🌐"
+    code = code.upper()
+    return chr(ord(code[0]) + 127397) + chr(ord(code[1]) + 127397)
+
 def get_cached_geolocation(ip):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT lat, lon, city, country, isp, org, as_num, hostname, timestamp FROM geolocations WHERE ip = ?", (ip,))
+        cursor.execute("SELECT lat, lon, city, country, country_code, isp, org, as_num, hostname, timestamp FROM geolocations WHERE ip = ?", (ip,))
         row = cursor.fetchone()
         conn.close()
         if row:
-            lat, lon, city, country, isp, org, as_num, hostname, ts = row
+            lat, lon, city, country, country_code, isp, org, as_num, hostname, ts = row
             if int(time.time()) - ts < (CACHE_TTL_DAYS * 86400):
                 return {
                     "status": "success",
@@ -52,6 +58,8 @@ def get_cached_geolocation(ip):
                     "lon": lon,
                     "city": city,
                     "country": country,
+                    "countryCode": country_code,
+                    "flag": country_code_to_flag(country_code),
                     "isp": isp,
                     "org": org,
                     "as": as_num,
@@ -66,14 +74,15 @@ def save_geolocation_to_cache(ip, data, hostname):
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT OR REPLACE INTO geolocations (ip, lat, lon, city, country, isp, org, as_num, hostname, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO geolocations (ip, lat, lon, city, country, country_code, isp, org, as_num, hostname, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             ip,
             data.get("lat", 0.0),
             data.get("lon", 0.0),
             data.get("city", "Unknown"),
             data.get("country", "Unknown"),
+            data.get("countryCode", ""),
             data.get("isp", "Unknown"),
             data.get("org", "Unknown"),
             data.get("as", "Unknown"),
@@ -108,17 +117,61 @@ def get_geolocation(ip=""):
                 hostname = get_hostname(resolved_ip)
                 save_geolocation_to_cache(resolved_ip, data, hostname)
                 data["hostname"] = hostname
+                data["flag"] = country_code_to_flag(data.get("countryCode", ""))
                 return data
     except Exception:
         pass
     return None
 
+def get_geolocations_batch(ip_list):
+    init_db()
+    results = {}
+    uncached = []
+
+    for ip in ip_list:
+        cached = get_cached_geolocation(ip)
+        if cached:
+            results[ip] = cached
+        else:
+            uncached.append(ip)
+
+    if uncached:
+        try:
+            payload = json.dumps(uncached).encode("utf-8")
+            req = urllib.request.Request(
+                IP_API_BATCH_URL,
+                data=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "User-Agent": "Mozilla/5.0 NetworkThreatVisualizer"
+                }
+            )
+            with urllib.request.urlopen(req, timeout=5.0) as response:
+                batch_data = json.loads(response.read().decode())
+                for item in batch_data:
+                    if isinstance(item, dict) and item.get("status") == "success":
+                        res_ip = item.get("query")
+                        hostname = get_hostname(res_ip)
+                        save_geolocation_to_cache(res_ip, item, hostname)
+                        item["hostname"] = hostname
+                        item["flag"] = country_code_to_flag(item.get("countryCode", ""))
+                        results[res_ip] = item
+        except Exception:
+            for ip in uncached:
+                res = get_geolocation(ip)
+                if res:
+                    results[ip] = res
+
+    return results
+
 def check_dnsbl_single(ip, dnsbl):
     try:
         reversed_ip = ".".join(reversed(ip.split(".")))
         query = reversed_ip + "." + dnsbl
-        socket.getaddrinfo(query, None)
-        return dnsbl
+        res = socket.gethostbyname(query)
+        if res and res != "127.0.0.2":
+            return dnsbl
+        return None
     except Exception:
         return None
 
