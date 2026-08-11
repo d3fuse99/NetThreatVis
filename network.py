@@ -31,6 +31,7 @@ def get_connections():
             if is_valid_remote(ip):
                 proc_name = "Unknown"
                 proc_path = ""
+                pid = conn.pid or 0
                 io_read = "0 B"
                 io_write = "0 B"
                 if conn.pid:
@@ -45,6 +46,7 @@ def get_connections():
                         pass
                 connections.append({
                     "ip": ip,
+                    "pid": pid,
                     "process": proc_name,
                     "process_path": proc_path,
                     "remote_port": conn.raddr.port,
