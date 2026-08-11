@@ -117,12 +117,26 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             border-radius: 4px;
             cursor: pointer;
             text-align: center;
-            margin-top: 10px;
+            margin-top: 8px;
             transition: all 0.2s;
         }
         .btn-export:hover {
             background-color: #30363d;
             color: #58a6ff;
+        }
+        .btn-kill {
+            background-color: #da3633;
+            color: white;
+            border: none;
+            padding: 4px 8px;
+            font-size: 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 6px;
+            font-weight: bold;
+        }
+        .btn-kill:hover {
+            background-color: #f85149;
         }
     </style>
 </head>
@@ -153,6 +167,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <div><span id="stat-max-label"></span>: <span id="stat-max-val" class="stats-val">0</span></div>
         </div>
         <button class="btn-export" onclick="exportCSV()">Export CSV Report</button>
+        <button class="btn-export" onclick="exportJSON()">Export JSON Report</button>
     </div>
 
     <script>
@@ -190,18 +205,26 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 .replace(/'/g, "&#39;");
         }
 
+        function copyKillCmd(pid) {
+            var cmd = "taskkill /F /PID " + pid;
+            navigator.clipboard.writeText(cmd).then(function() {
+                alert("Kill command copied: " + cmd);
+            });
+        }
+
         var safeLocalQuery = escapeHtml(localGeo.query);
         var safeLocalIsp = escapeHtml(localGeo.isp);
         var safeLocalAs = escapeHtml(localGeo.as);
         var safeLocalCity = escapeHtml(localGeo.city);
         var safeLocalCountry = escapeHtml(localGeo.country);
+        var localFlag = localGeo.flag || "🌐";
 
         var ispMarker = L.marker([localLat, localLon]).addTo(map);
         ispMarker.bindPopup("<b>" + labels.map_isp_title + "</b><br>" +
                              "<b>IP:</b> " + (safeLocalQuery || "Unknown") + "<br>" +
                              "<b>" + labels.map_popup_isp + ":</b> " + (safeLocalIsp || "Unknown") + "<br>" +
                              "<b>" + labels.map_popup_as + ":</b> " + (safeLocalAs || "Unknown") + "<br>" +
-                             "<b>" + labels.map_popup_loc + ":</b> " + (safeLocalCity || "Unknown") + ", " + (safeLocalCountry || "Unknown"));
+                             "<b>" + labels.map_popup_loc + ":</b> " + localFlag + " " + (safeLocalCity || "Unknown") + ", " + (safeLocalCountry || "Unknown"));
 
         if (navigator.geolocation) {
             navigator.geolocation.getCurrentPosition(function(position) {
@@ -261,12 +284,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             var safeStatus = escapeHtml(conn.status);
             var safeIoRead = escapeHtml(conn.io_read || "0 B");
             var safeIoWrite = escapeHtml(conn.io_write || "0 B");
+            var flag = conn.flag || "🌐";
+            var pid = conn.pid || 0;
 
             if (conn.score > maxThreatScore) {
                 maxThreatScore = conn.score;
             }
 
-            var popupContent = "<b>" + labels.map_popup_process + ":</b> " + safeProcess + "<br>" +
+            var popupContent = "<b>" + labels.map_popup_process + ":</b> " + safeProcess + " (PID: " + pid + ")<br>" +
                                "<b>" + labels.map_popup_ip + ":</b> " + safeIp + " (" + conn.remote_port + ")<br>" +
                                "<b>" + labels.map_popup_hostname + ":</b> " + safeHostname + "<br>" +
                                "<b>Traffic I/O:</b> R: " + safeIoRead + " | W: " + safeIoWrite + "<br>" +
@@ -274,9 +299,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                                "<b>" + labels.map_popup_status + ":</b> " + safeStatus + "<br>" +
                                "<b>" + labels.map_popup_isp + ":</b> " + safeIsp + "<br>" +
                                "<b>" + labels.map_popup_as + ":</b> " + safeAs + "<br>" +
-                               "<b>" + labels.map_popup_loc + ":</b> " + safeCity + ", " + safeCountry + "<br>" +
+                               "<b>" + labels.map_popup_loc + ":</b> " + flag + " " + safeCity + ", " + safeCountry + "<br>" +
                                "<b>" + labels.map_popup_score + ":</b> " + conn.score + "/100<br>" +
-                               "<b>" + labels.map_popup_factors + ":</b><br>&bull; " + factorsText;
+                               "<b>" + labels.map_popup_factors + ":</b><br>&bull; " + factorsText + "<br>" +
+                               "<button class='btn-kill' onclick='copyKillCmd(" + pid + ")'>Copy Taskkill Command</button>";
+
             remoteMarker.bindPopup(popupContent);
 
             var line = L.polyline([
@@ -370,18 +397,19 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         }
 
         function exportCSV() {
-            var csvRows = ["Process,Remote IP,Remote Port,Local Port,Status,Read Bytes,Written Bytes,City,Country,ISP,Threat Score"];
+            var csvRows = ["Process,PID,Remote IP,Remote Port,Local Port,Status,Read Bytes,Written Bytes,Country,City,ISP,Threat Score"];
             connections.forEach(function(c) {
                 var row = [
                     '"' + c.process + '"',
+                    c.pid || 0,
                     '"' + c.ip + '"',
                     c.remote_port,
                     c.local_port,
                     '"' + c.status + '"',
                     '"' + (c.io_read || "0 B") + '"',
                     '"' + (c.io_write || "0 B") + '"',
-                    '"' + c.city + '"',
                     '"' + c.country + '"',
+                    '"' + c.city + '"',
                     '"' + c.isp + '"',
                     c.score
                 ];
@@ -392,6 +420,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             var a = document.createElement('a');
             a.setAttribute('href', url);
             a.setAttribute('download', 'network_threat_report.csv');
+            a.click();
+        }
+
+        function exportJSON() {
+            var dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(connections, null, 2));
+            var a = document.createElement('a');
+            a.setAttribute('href', dataStr);
+            a.setAttribute('download', 'network_threat_report.json');
             a.click();
         }
     </script>
