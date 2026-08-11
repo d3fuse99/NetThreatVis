@@ -4,11 +4,10 @@ import webbrowser
 import json
 import threading
 import platform
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
-from config import SERVER_HOST, SERVER_PORT, MAX_WORKERS
-from geo import get_geolocation, evaluate_reputation
+from config import SERVER_HOST, SERVER_PORT
+from geo import get_geolocation, get_geolocations_batch, evaluate_reputation
 from network import get_connections
 from map_gen import HTML_TEMPLATE
 
@@ -121,22 +120,9 @@ def get_port_color(port):
         return "purple"
     return "red"
 
-def fetch_ip_worker(ip):
-    geo = get_geolocation(ip)
-    return ip, geo
-
 def process_active_connections(active_conns, limit=100):
     unique_ips = list(set(conn["ip"] for conn in active_conns))[:limit]
-    cache = {}
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = {executor.submit(fetch_ip_worker, ip): ip for ip in unique_ips}
-        for future in as_completed(futures):
-            try:
-                resolved_ip, geo = future.result()
-                if geo:
-                    cache[resolved_ip] = geo
-            except Exception:
-                pass
+    cache = get_geolocations_batch(unique_ips)
 
     remote_data = []
     for conn in active_conns:
@@ -152,6 +138,7 @@ def process_active_connections(active_conns, limit=100):
             
             remote_data.append({
                 "ip": ip,
+                "pid": conn.get("pid", 0),
                 "process": conn["process"],
                 "local_port": conn["local_port"],
                 "remote_port": conn["remote_port"],
@@ -160,6 +147,7 @@ def process_active_connections(active_conns, limit=100):
                 "lon": geo.get("lon", 0.0),
                 "city": geo.get("city", "Unknown"),
                 "country": geo.get("country", "Unknown"),
+                "flag": geo.get("flag", "🌐"),
                 "isp": isp,
                 "as": as_num,
                 "score": score,
@@ -180,7 +168,7 @@ def run_scan_thread(limit):
     SCAN_STATE["remote_data"] = []
     
     local_geo = get_geolocation() or {
-        "lat": 0.0, "lon": 0.0, "city": "Unknown", "country": "Unknown", 
+        "lat": 0.0, "lon": 0.0, "city": "Unknown", "country": "Unknown", "flag": "🌐",
         "query": "127.0.0.1", "isp": "Unknown", "org": "Unknown", "as": "Unknown"
     }
     SCAN_STATE["local_geo"] = local_geo
@@ -189,54 +177,11 @@ def run_scan_thread(limit):
     unique_ips = list(set(conn["ip"] for conn in active_conns))[:limit]
     SCAN_STATE["total"] = len(unique_ips)
 
-    cache = {}
-    completed_count = 0
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = {executor.submit(fetch_ip_worker, ip): ip for ip in unique_ips}
-        for future in as_completed(futures):
-            completed_count += 1
-            ip = futures[future]
-            SCAN_STATE["current"] = completed_count
-            SCAN_STATE["current_ip"] = ip
-            try:
-                resolved_ip, geo = future.result()
-                if geo:
-                    cache[resolved_ip] = geo
-            except Exception:
-                pass
+    if unique_ips:
+        SCAN_STATE["current"] = len(unique_ips)
+        SCAN_STATE["current_ip"] = unique_ips[-1]
 
-    remote_data = []
-    for conn in active_conns:
-        ip = conn["ip"]
-        if ip in cache:
-            geo = cache[ip]
-            isp = geo.get("isp", "Unknown")
-            org = geo.get("org", "Unknown")
-            as_num = geo.get("as", "Unknown")
-            
-            score, factors = evaluate_reputation(ip, isp, org, conn.get("process_path", ""))
-            color = get_port_color(conn["remote_port"])
-            
-            remote_data.append({
-                "ip": ip,
-                "process": conn["process"],
-                "local_port": conn["local_port"],
-                "remote_port": conn["remote_port"],
-                "status": conn["status"],
-                "lat": geo.get("lat", 0.0),
-                "lon": geo.get("lon", 0.0),
-                "city": geo.get("city", "Unknown"),
-                "country": geo.get("country", "Unknown"),
-                "isp": isp,
-                "as": as_num,
-                "score": score,
-                "factors": factors,
-                "color": color,
-                "hostname": geo.get("hostname", "Unknown"),
-                "io_read": conn.get("io_read", "0 B"),
-                "io_write": conn.get("io_write", "0 B")
-            })
-            
+    remote_data = process_active_connections(active_conns, limit)
     SCAN_STATE["remote_data"] = remote_data
     SCAN_STATE["status"] = "complete"
 
@@ -258,7 +203,7 @@ class VisualizerHandler(BaseHTTPRequestHandler):
                 local_platform = platform.system() + " " + platform.release()
 
                 local_geo = get_geolocation() or {
-                    "lat": 0.0, "lon": 0.0, "city": "Unknown", "country": "Unknown", 
+                    "lat": 0.0, "lon": 0.0, "city": "Unknown", "country": "Unknown", "flag": "🌐",
                     "query": "127.0.0.1", "isp": "Unknown", "org": "Unknown", "as": "Unknown"
                 }
 
@@ -404,7 +349,7 @@ class VisualizerHandler(BaseHTTPRequestHandler):
                 </div>
                 <div class="telemetry-row">
                     <div class="telemetry-label">__LABEL_NET_LOC__</div>
-                    <div class="telemetry-value">__LOCAL_CITY__, __LOCAL_COUNTRY__</div>
+                    <div class="telemetry-value">__LOCAL_FLAG__ __LOCAL_CITY__, __LOCAL_COUNTRY__</div>
                 </div>
                 <div class="telemetry-row">
                     <div class="telemetry-label">__LABEL_NET_PLATFORM__</div>
@@ -461,6 +406,7 @@ class VisualizerHandler(BaseHTTPRequestHandler):
                 home_html = home_html.replace("__LABEL_CONTROL_TITLE__", labels["dash_control_title"])
                 home_html = home_html.replace("__LOCAL_IP__", str(local_geo.get("query", "Unknown")))
                 home_html = home_html.replace("__LOCAL_ISP__", str(local_geo.get("isp", "Unknown")))
+                home_html = home_html.replace("__LOCAL_FLAG__", str(local_geo.get("flag", "🌐")))
                 home_html = home_html.replace("__LOCAL_CITY__", str(local_geo.get("city", "Unknown")))
                 home_html = home_html.replace("__LOCAL_COUNTRY__", str(local_geo.get("country", "Unknown")))
                 home_html = home_html.replace("__LOCAL_PLATFORM__", str(local_platform))
